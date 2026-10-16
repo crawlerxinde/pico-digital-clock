@@ -10,6 +10,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FONT="${CJK_FONT:-/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf}"
+# 拉丁/数字字形取自 Montserrat，与 LVGL 内置字体一致（Droid fallback 不含拉丁字形）
+LATIN_FONT="${LATIN_FONT:-$ROOT/lib/lvgl/scripts/built_in_font/Montserrat-Medium.ttf}"
 OUT="$ROOT/src"
 
 if ! command -v lv_font_conv >/dev/null 2>&1; then
@@ -18,6 +20,10 @@ if ! command -v lv_font_conv >/dev/null 2>&1; then
 fi
 if [ ! -f "$FONT" ]; then
     echo "CJK font not found: $FONT (override with CJK_FONT=...)" >&2
+    exit 1
+fi
+if [ ! -f "$LATIN_FONT" ]; then
+    echo "Latin font not found: $LATIN_FONT (override with LATIN_FONT=...)" >&2
     exit 1
 fi
 
@@ -40,9 +46,11 @@ echo "glyphs: $SYMS"
 
 for size in 20 16 12; do
     echo "generating font_cjk_${size}.c"
-    lv_font_conv --font "$FONT" --size "$size" --bpp 4 --format lvgl \
+    lv_font_conv --font "$LATIN_FONT" -r 0x20-0x7f \
+        --font "$FONT" --symbols "$SYMS" \
+        --size "$size" --bpp 4 --format lvgl \
+        --no-compress --no-prefilter \
         --lv-include lvgl.h --lv-font-name "font_cjk_${size}" \
-        --range 0x20-0x7f --symbols "$SYMS" \
         -o "$OUT/font_cjk_${size}.c"
 done
 
