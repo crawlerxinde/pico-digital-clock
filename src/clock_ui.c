@@ -16,6 +16,11 @@
 #define LOGIC_W 640
 #define LOGIC_H 172
 
+/* 中文字库（由 DroidSansFallbackFull.ttf 生成，见 tools/gen_fonts.sh） */
+LV_FONT_DECLARE(font_cjk_20);
+LV_FONT_DECLARE(font_cjk_16);
+LV_FONT_DECLARE(font_cjk_12);
+
 /* ================= 显示 ================= */
 static lv_disp_drv_t      disp_drv;
 static lv_disp_draw_buf_t disp_buf;
@@ -160,7 +165,7 @@ static void build_clock_tile(lv_obj_t *tile)
     lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
 
     date_label = lv_label_create(tile);
-    lv_obj_set_style_text_font(date_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(date_label, &font_cjk_20, 0);
     lv_obj_set_style_text_color(date_label, lv_color_hex(0x9AA0A6), 0);
     lv_label_set_text(date_label, "----/--/--");
     lv_obj_align(date_label, LV_ALIGN_TOP_MID, 0, 12);
@@ -197,7 +202,7 @@ static void build_info_tile(lv_obj_t *tile)
     lv_obj_set_style_bg_color(tile, lv_color_hex(0x0A0F0A), 0);
 
     lv_obj_t *title = lv_label_create(tile);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(title, &font_cjk_20, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0x76FF03), 0);
     lv_label_set_text(title, "设备信息");
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
@@ -216,22 +221,31 @@ static void build_info_tile(lv_obj_t *tile)
 }
 
 /* ----------------------------- 设置页 ----------------------------- */
-static lv_obj_t *menu_add_row(lv_obj_t *list, int index, const char *text)
+/* 菜单行：左侧两行文字（标题 + 功能说明），右侧留给控件 */
+static lv_obj_t *menu_add_row(lv_obj_t *list, int index,
+                              const char *title, const char *desc)
 {
     lv_obj_t *row = lv_obj_create(list);
-    lv_obj_set_size(row, LOGIC_W - 24, 46);
-    lv_obj_set_pos(row, 12, 8 + index * 54);
+    lv_obj_set_size(row, LOGIC_W - 24, 48);
+    lv_obj_set_pos(row, 12, 6 + index * 54);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(row, lv_color_hex(0x141A22), 0);
     lv_obj_set_style_border_width(row, 0, 0);
     lv_obj_set_style_radius(row, 8, 0);
-    lv_obj_set_style_pad_all(row, 6, 0);
+    lv_obj_set_style_pad_all(row, 8, 0);
 
-    lv_obj_t *lbl = lv_label_create(row);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(lbl, lv_color_hex(0xE0E0E0), 0);
-    lv_label_set_text(lbl, text);
-    lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_t *t = lv_label_create(row);
+    lv_obj_set_style_text_font(t, &font_cjk_16, 0);
+    lv_obj_set_style_text_color(t, lv_color_hex(0xF0F0F0), 0);
+    lv_label_set_text(t, title);
+    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *d = lv_label_create(row);
+    lv_obj_set_style_text_font(d, &font_cjk_12, 0);
+    lv_obj_set_style_text_color(d, lv_color_hex(0x808A94), 0);
+    lv_label_set_text(d, desc);
+    lv_obj_align(d, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
     return row;
 }
 
@@ -252,51 +266,54 @@ static void build_menu_tile(lv_obj_t *tile)
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
 
     /* 0 亮度 */
-    lv_obj_t *r0 = menu_add_row(list, 0, "亮度");
+    lv_obj_t *r0 = menu_add_row(list, 0, "亮度", "调整屏幕背光亮度");
     brightness_slider = lv_slider_create(r0);
-    lv_obj_set_width(brightness_slider, 300);
-    lv_obj_align(brightness_slider, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_width(brightness_slider, 240);
+    /* 右移 18px：滑块圆点约超出本体右缘 16px，避免越出行边界 */
+    lv_obj_align(brightness_slider, LV_ALIGN_RIGHT_MID, -18, 0);
     lv_slider_set_range(brightness_slider, 10, 100);
     lv_slider_set_value(brightness_slider, s_brightness, LV_ANIM_OFF);
     lv_obj_add_event_cb(brightness_slider, slider_brightness_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* 1 声音 */
-    lv_obj_t *r1 = menu_add_row(list, 1, "声音");
+    lv_obj_t *r1 = menu_add_row(list, 1, "声音", "每秒滴答提示音");
     lv_obj_t *sw1 = lv_switch_create(r1);
     lv_obj_align(sw1, LV_ALIGN_RIGHT_MID, 0, 0);
     if (s_sound_on) lv_obj_add_state(sw1, LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw1, switch_sound_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* 2 24 小时制 */
-    lv_obj_t *r2 = menu_add_row(list, 2, "24 小时制");
+    lv_obj_t *r2 = menu_add_row(list, 2, "24 小时制", "切换 12/24 小时显示");
     lv_obj_t *sw2 = lv_switch_create(r2);
     lv_obj_align(sw2, LV_ALIGN_RIGHT_MID, 0, 0);
     if (s_use_24h) lv_obj_add_state(sw2, LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw2, switch_24h_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* 3 秒进度条 */
-    lv_obj_t *r3 = menu_add_row(list, 3, "秒进度条");
+    lv_obj_t *r3 = menu_add_row(list, 3, "秒进度条", "显示秒进度指示条");
     lv_obj_t *sw3 = lv_switch_create(r3);
     lv_obj_align(sw3, LV_ALIGN_RIGHT_MID, 0, 0);
     if (s_show_sec_bar) lv_obj_add_state(sw3, LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw3, switch_secbar_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* 4 主题色 */
-    lv_obj_t *r4 = menu_add_row(list, 4, "主题色");
+    lv_obj_t *r4 = menu_add_row(list, 4, "主题色", "更换时钟主题颜色");
     lv_obj_t *btn4 = lv_btn_create(r4);
     lv_obj_set_size(btn4, 90, 34);
     lv_obj_align(btn4, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_t *bl4 = lv_label_create(btn4);
+    lv_obj_set_style_text_font(bl4, &font_cjk_16, 0);
     lv_label_set_text(bl4, "切换");
     lv_obj_center(bl4);
     lv_obj_add_event_cb(btn4, theme_btn_cb, LV_EVENT_CLICKED, NULL);
 
     /* 5 时间重置 */
-    lv_obj_t *r5 = menu_add_row(list, 5, "时间重置");
+    lv_obj_t *r5 = menu_add_row(list, 5, "时间重置", "用编译时间校准 RTC");
     lv_obj_t *btn5 = lv_btn_create(r5);
     lv_obj_set_size(btn5, 90, 34);
     lv_obj_align(btn5, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_t *bl5 = lv_label_create(btn5);
+    lv_obj_set_style_text_font(bl5, &font_cjk_16, 0);
     lv_label_set_text(bl5, "重置");
     lv_obj_center(bl5);
     lv_obj_add_event_cb(btn5, reset_time_btn_cb, LV_EVENT_CLICKED, NULL);

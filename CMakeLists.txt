@@ -63,7 +63,10 @@ pico_generate_pio_header(pico-clock ${CMAKE_CURRENT_LIST_DIR}/lib/audio_pio/audi
 
 target_sources(pico-clock PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/lib/audio_pio/audio_pio.c
-    ${CMAKE_CURRENT_LIST_DIR}/lib/es8311/es8311.c)
+    ${CMAKE_CURRENT_LIST_DIR}/lib/es8311/es8311.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/font_cjk_20.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/font_cjk_16.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/font_cjk_12.c)
 
 
 pico_set_program_name(pico-clock "pico-clock")
