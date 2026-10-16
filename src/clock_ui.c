@@ -10,6 +10,7 @@
 #include "rp_pico_alloc.h"
 #include "audio_pio.h"
 #include "es8311.h"
+#include "tick_pcm.h"
 #include "hardware/watchdog.h"
 
 /* 逻辑横屏分辨率 */
@@ -20,6 +21,7 @@
 LV_FONT_DECLARE(font_cjk_20);
 LV_FONT_DECLARE(font_cjk_16);
 LV_FONT_DECLARE(font_cjk_12);
+LV_FONT_DECLARE(font_7seg);
 
 /* ================= 显示 ================= */
 static lv_disp_drv_t      disp_drv;
@@ -34,6 +36,8 @@ static lv_obj_t *tv;
 static lv_obj_t *tile_clock, *tile_info, *tile_menu;
 
 static lv_obj_t *time_label;
+static lv_obj_t *time_ghost;
+static lv_obj_t *ampm_label;
 static lv_obj_t *date_label;
 static lv_obj_t *sec_bar;
 static lv_obj_t *imu_label;
@@ -67,8 +71,9 @@ static bool s_show_sec_bar = true;
 static int  s_theme_idx    = 0;
 static uint32_t s_hint_until = 0;
 
-static const uint32_t THEME_COLORS[] = { 0x00E5FF, 0x76FF03, 0xFF4081, 0xFFD600, 0xB388FF };
+static const uint32_t THEME_COLORS[] = { 0xFF1A1A, 0x00E5FF, 0x76FF03, 0xFF4081, 0xFFD600, 0xB388FF };
 #define THEME_COUNT (sizeof(THEME_COLORS) / sizeof(THEME_COLORS[0]))
+static lv_obj_t *theme_swatches[THEME_COUNT];
 
 static const char *WEEK_CN[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
 
@@ -89,7 +94,7 @@ static void slider_brightness_cb(lv_event_t *e);
 static void switch_sound_cb(lv_event_t *e);
 static void switch_24h_cb(lv_event_t *e);
 static void switch_secbar_cb(lv_event_t *e);
-static void theme_btn_cb(lv_event_t *e);
+static void theme_swatch_cb(lv_event_t *e);
 static void reset_time_btn_cb(lv_event_t *e);
 
 /********************************************************************************
@@ -154,43 +159,51 @@ void ClockUI_Build(void)
 static void build_clock_tile(lv_obj_t *tile)
 {
     lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(tile, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_bg_grad_color(tile, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_grad_dir(tile, LV_GRAD_DIR_VER, 0);
-
-    lv_obj_t *line = lv_obj_create(tile);
-    lv_obj_remove_style_all(line);
-    lv_obj_set_size(line, LOGIC_W, 4);
-    lv_obj_align(line, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(line, lv_color_hex(0x00E5FF), 0);
-    lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(tile, lv_color_hex(0x000000), 0);
 
     date_label = lv_label_create(tile);
-    lv_obj_set_style_text_font(date_label, &font_cjk_20, 0);
-    lv_obj_set_style_text_color(date_label, lv_color_hex(0x9AA0A6), 0);
+    lv_obj_set_style_text_font(date_label, &font_cjk_16, 0);
+    lv_obj_set_style_text_color(date_label, lv_color_hex(0xFF1A1A), 0);
+    lv_obj_set_style_text_opa(date_label, LV_OPA_60, 0);
     lv_label_set_text(date_label, "----/--/--");
-    lv_obj_align(date_label, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_align(date_label, LV_ALIGN_TOP_MID, 0, 2);
+
+    /* 数码管：先铺一层暗色 "88:88:88" 作为未点亮的段，时间再叠上去 */
+    time_ghost = lv_label_create(tile);
+    lv_obj_set_style_text_font(time_ghost, &font_7seg, 0);
+    lv_obj_set_style_text_color(time_ghost, lv_color_hex(0xFF1A1A), 0);
+    lv_obj_set_style_text_opa(time_ghost, LV_OPA_20, 0);
+    lv_label_set_text(time_ghost, "88:88:88");
+    lv_obj_align(time_ghost, LV_ALIGN_CENTER, 0, 10);
 
     time_label = lv_label_create(tile);
-    lv_obj_set_style_text_font(time_label, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_text_color(time_label, lv_color_hex(0x00E5FF), 0);
+    lv_obj_set_style_text_font(time_label, &font_7seg, 0);
+    lv_obj_set_style_text_color(time_label, lv_color_hex(0xFF1A1A), 0);
     lv_label_set_text(time_label, "00:00:00");
     lv_obj_align(time_label, LV_ALIGN_CENTER, 0, 10);
 
+    /* 12 小时制时的 AM/PM 小标（右侧） */
+    ampm_label = lv_label_create(tile);
+    lv_obj_set_style_text_font(ampm_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(ampm_label, lv_color_hex(0xFF1A1A), 0);
+    lv_label_set_text(ampm_label, "AM");
+    lv_obj_align(ampm_label, LV_ALIGN_RIGHT_MID, -6, 0);
+    lv_obj_add_flag(ampm_label, LV_OBJ_FLAG_HIDDEN);
+
     sec_bar = lv_bar_create(tile);
-    lv_obj_set_size(sec_bar, 600, 8);
-    lv_obj_align(sec_bar, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_size(sec_bar, 600, 5);
+    lv_obj_align(sec_bar, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_bar_set_range(sec_bar, 0, 59);
     lv_bar_set_value(sec_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(sec_bar, lv_color_hex(0x1B2733), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(sec_bar, lv_color_hex(0x00E5FF), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sec_bar, lv_color_hex(0x1A0505), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sec_bar, lv_color_hex(0xFF1A1A), LV_PART_INDICATOR);
 
     /* 亮度提示（右上角，调节时短暂显示） */
     brightness_hint = lv_label_create(tile);
     lv_obj_set_style_text_font(brightness_hint, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(brightness_hint, lv_color_hex(0xFFFFFF), 0);
     lv_label_set_text(brightness_hint, "100%");
-    lv_obj_align(brightness_hint, LV_ALIGN_TOP_RIGHT, -12, 10);
+    lv_obj_align(brightness_hint, LV_ALIGN_TOP_RIGHT, -12, 4);
     lv_obj_add_flag(brightness_hint, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
@@ -297,16 +310,27 @@ static void build_menu_tile(lv_obj_t *tile)
     if (s_show_sec_bar) lv_obj_add_state(sw3, LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw3, switch_secbar_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    /* 4 主题色 */
-    lv_obj_t *r4 = menu_add_row(list, 4, "主题色", "更换时钟主题颜色");
-    lv_obj_t *btn4 = lv_btn_create(r4);
-    lv_obj_set_size(btn4, 90, 34);
-    lv_obj_align(btn4, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_t *bl4 = lv_label_create(btn4);
-    lv_obj_set_style_text_font(bl4, &font_cjk_16, 0);
-    lv_label_set_text(bl4, "切换");
-    lv_obj_center(bl4);
-    lv_obj_add_event_cb(btn4, theme_btn_cb, LV_EVENT_CLICKED, NULL);
+    /* 4 主题色：直接列出可选色块，点击即选中 */
+    lv_obj_t *r4 = menu_add_row(list, 4, "主题色", "选择时钟主题颜色");
+    lv_obj_t *sw = lv_obj_create(r4);
+    lv_obj_remove_style_all(sw);
+    lv_obj_clear_flag(sw, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(sw, (int)THEME_COUNT * 38 - 8, 30);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+    for (int i = 0; i < (int)THEME_COUNT; i++) {
+        lv_obj_t *b = lv_btn_create(sw);
+        lv_obj_set_size(b, 30, 30);
+        lv_obj_set_pos(b, i * 38, 0);
+        lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(b, lv_color_hex(THEME_COLORS[i]), 0);
+        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_set_style_border_width(b, (i == s_theme_idx) ? 3 : 0, 0);
+        lv_obj_set_style_border_color(b, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_opa(b, LV_OPA_COVER, 0);
+        lv_obj_add_event_cb(b, theme_swatch_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        theme_swatches[i] = b;
+    }
 
     /* 5 时间重置 */
     lv_obj_t *r5 = menu_add_row(list, 5, "时间重置", "用编译时间校准 RTC");
@@ -344,10 +368,17 @@ static void switch_secbar_cb(lv_event_t *e)
     else                lv_obj_add_flag(sec_bar, LV_OBJ_FLAG_HIDDEN);
 }
 
-static void theme_btn_cb(lv_event_t *e)
+static void theme_swatch_cb(lv_event_t *e)
 {
-    s_theme_idx = (s_theme_idx + 1) % THEME_COUNT;
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if (idx < 0 || idx >= (int)THEME_COUNT) return;
+    s_theme_idx = idx;
     apply_theme();
+    for (int i = 0; i < (int)THEME_COUNT; i++) {
+        if (theme_swatches[i]) {
+            lv_obj_set_style_border_width(theme_swatches[i], (i == idx) ? 3 : 0, 0);
+        }
+    }
 }
 
 static void reset_time_btn_cb(lv_event_t *e)
@@ -357,51 +388,12 @@ static void reset_time_btn_cb(lv_event_t *e)
 }
 
 
-/* ================= 音频：很轻的"喀哒"声 + core1 常驻喂 I2S ================= */
+/* ================= 音频：滴答声（MP3 提取的 PCM）+ core1 常驻喂 I2S ================= */
 #define PA_CTRL_PIN    0
-#define SAMPLE_RATE    24000
-#define TICK_MS        12
-#define TICK_N         (SAMPLE_RATE * TICK_MS / 1000)
-#define AUDIO_RING_SIZE 4096
+#define AUDIO_RING_SIZE 8192
 #define KEY_LONG_MS    1500
 
-static const int16_t sine256[256] = {
-         0,    804,   1608,   2410,   3212,   4011,   4808,   5602,
-      6393,   7179,   7962,   8739,   9512,  10278,  11039,  11793,
-     12539,  13279,  14010,  14732,  15446,  16151,  16846,  17530,
-     18204,  18868,  19519,  20159,  20787,  21403,  22005,  22594,
-     23170,  23731,  24279,  24811,  25329,  25832,  26319,  26790,
-     27245,  27683,  28105,  28510,  28898,  29268,  29621,  29956,
-     30273,  30571,  30852,  31113,  31356,  31580,  31785,  31971,
-     32137,  32285,  32412,  32521,  32609,  32678,  32728,  32757,
-     32767,  32757,  32728,  32678,  32609,  32521,  32412,  32285,
-     32137,  31971,  31785,  31580,  31356,  31113,  30852,  30571,
-     30273,  29956,  29621,  29268,  28898,  28510,  28105,  27683,
-     27245,  26790,  26319,  25832,  25329,  24811,  24279,  23731,
-     23170,  22594,  22005,  21403,  20787,  20159,  19519,  18868,
-     18204,  17530,  16846,  16151,  15446,  14732,  14010,  13279,
-     12539,  11793,  11039,  10278,   9512,   8739,   7962,   7179,
-      6393,   5602,   4808,   4011,   3212,   2410,   1608,    804,
-         0,   -804,  -1608,  -2410,  -3212,  -4011,  -4808,  -5602,
-     -6393,  -7179,  -7962,  -8739,  -9512, -10278, -11039, -11793,
-    -12539, -13279, -14010, -14732, -15446, -16151, -16846, -17530,
-    -18204, -18868, -19519, -20159, -20787, -21403, -22005, -22594,
-    -23170, -23731, -24279, -24811, -25329, -25832, -26319, -26790,
-    -27245, -27683, -28105, -28510, -28898, -29268, -29621, -29956,
-    -30273, -30571, -30852, -31113, -31356, -31580, -31785, -31971,
-    -32137, -32285, -32412, -32521, -32609, -32678, -32728, -32757,
-    -32767, -32757, -32728, -32678, -32609, -32521, -32412, -32285,
-    -32137, -31971, -31785, -31580, -31356, -31113, -30852, -30571,
-    -30273, -29956, -29621, -29268, -28898, -28510, -28105, -27683,
-    -27245, -26790, -26319, -25832, -25329, -24811, -24279, -23731,
-    -23170, -22594, -22005, -21403, -20787, -20159, -19519, -18868,
-    -18204, -17530, -16846, -16151, -15446, -14732, -14010, -13279,
-    -12539, -11793, -11039, -10278,  -9512,  -8739,  -7962,  -7179,
-     -6393,  -5602,  -4808,  -4011,  -3212,  -2410,  -1608,   -804,
-};
 
-static int16_t tick_hi[TICK_N];
-static int16_t tick_lo[TICK_N];
 
 static volatile int16_t  audio_ring[AUDIO_RING_SIZE];
 static volatile uint32_t audio_head = 0;
@@ -410,46 +402,6 @@ static volatile uint32_t audio_tail = 0;
 static bool     s_screen_on    = true;
 static bool     s_audio_muted  = true;
 static uint32_t s_last_tick_ms = 0;
-
-static uint32_t rng_state = 0x9E3779B9u;
-static int32_t noise_sample(void)
-{
-    rng_state = rng_state * 1664525u + 1013904223u;
-    return (int32_t)(rng_state >> 18) - 4096;
-}
-
-static void make_click(int16_t *buf, uint32_t freq_hz)
-{
-    const int attack = SAMPLE_RATE / 2000;
-    uint32_t phase = 0;
-    uint32_t step = (uint32_t)(((uint64_t)freq_hz * 256 * 65536) / SAMPLE_RATE);
-    int32_t env = 0, lp = 0;
-
-    for (int i = 0; i < TICK_N; i++) {
-        if (i < attack) env = 32767 * i / attack;
-        else            env = env * 250 / 256;
-        int idx = (phase >> 16) & 0xFF;
-        int32_t mix = sine256[idx] / 3 + noise_sample();
-        lp += (mix - lp) / 2;
-        buf[i] = (int16_t)((int32_t)lp * env / 32768);
-        phase += step;
-    }
-    int32_t peak = 0;
-    for (int i = 0; i < TICK_N; i++) {
-        int32_t a = buf[i] < 0 ? -buf[i] : buf[i];
-        if (a > peak) peak = a;
-    }
-    if (peak > 0) {
-        const int32_t target = 8000;
-        for (int i = 0; i < TICK_N; i++) buf[i] = (int16_t)((int32_t)buf[i] * target / peak);
-    }
-}
-
-static void tick_init(void)
-{
-    make_click(tick_hi, 1500);
-    make_click(tick_lo, 1100);
-}
 
 static void audio_feed_core1(void)
 {
@@ -465,8 +417,8 @@ static void audio_feed_core1(void)
 
 static void play_tick(bool high)
 {
-    const int16_t *buf = high ? tick_hi : tick_lo;
-    for (int i = 0; i < TICK_N; i++) {
+    const int16_t *buf = high ? tick_pcm_a : tick_pcm_b;
+    for (int i = 0; i < TICK_PCM_N; i++) {
         uint32_t next = (audio_head + 1) & (AUDIO_RING_SIZE - 1);
         if (next == audio_tail) break;
         audio_ring[audio_head] = buf[i];
@@ -486,7 +438,6 @@ static void audio_init(void)
 
     mclk_pio_init();
     dout_pio_init();
-    tick_init();
     es8311_voice_mute(true);
 }
 
@@ -648,11 +599,15 @@ static void update_clock_ui(datetime_t *t)
     char buf[40];
     if (s_use_24h) {
         snprintf(buf, sizeof(buf), "%02d:%02d:%02d", t->hour, t->min, t->sec);
+        if (ampm_label) lv_obj_add_flag(ampm_label, LV_OBJ_FLAG_HIDDEN);
     } else {
         int h12 = t->hour % 12;
         if (h12 == 0) h12 = 12;
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d %s", h12, t->min, t->sec,
-                 t->hour < 12 ? "AM" : "PM");
+        snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h12, t->min, t->sec);
+        if (ampm_label) {
+            lv_label_set_text(ampm_label, t->hour < 12 ? "AM" : "PM");
+            lv_obj_clear_flag(ampm_label, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     lv_label_set_text(time_label, buf);
 
@@ -685,6 +640,12 @@ static void apply_theme(void)
 {
     uint32_t c = THEME_COLORS[s_theme_idx];
     if (time_label) lv_obj_set_style_text_color(time_label, lv_color_hex(c), 0);
+    if (time_ghost) lv_obj_set_style_text_color(time_ghost, lv_color_hex(c), 0);
+    if (ampm_label) lv_obj_set_style_text_color(ampm_label, lv_color_hex(c), 0);
+    if (date_label) {
+        lv_obj_set_style_text_color(date_label, lv_color_hex(c), 0);
+        lv_obj_set_style_text_opa(date_label, LV_OPA_60, 0);
+    }
     if (sec_bar)    lv_obj_set_style_bg_color(sec_bar, lv_color_hex(c), LV_PART_INDICATOR);
 }
 

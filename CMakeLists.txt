@@ -66,7 +66,9 @@ target_sources(pico-clock PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/lib/es8311/es8311.c
     ${CMAKE_CURRENT_LIST_DIR}/src/font_cjk_20.c
     ${CMAKE_CURRENT_LIST_DIR}/src/font_cjk_16.c
-    ${CMAKE_CURRENT_LIST_DIR}/src/font_cjk_12.c)
+    ${CMAKE_CURRENT_LIST_DIR}/src/font_cjk_12.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/font_7seg.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/tick_pcm.c)
 
 
 pico_set_program_name(pico-clock "pico-clock")

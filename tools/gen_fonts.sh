@@ -54,4 +54,16 @@ for size in 20 16 12; do
         -o "$OUT/font_cjk_${size}.c"
 done
 
+# 数码管字体（DSEG7 Classic Bold，SIL OFL），用于时钟页 7 段数码显示
+SEG_FONT="$ROOT/tools/fonts/DSEG7Classic-Bold.woff"
+if [ -f "$SEG_FONT" ]; then
+    echo "generating font_7seg.c"
+    lv_font_conv --font "$SEG_FONT" -r 0x20-0x3a --size 104 --bpp 4 --format lvgl \
+        --no-compress --no-prefilter \
+        --lv-include lvgl.h --lv-font-name font_7seg \
+        -o "$ROOT/src/font_7seg.c"
+else
+    echo "skip font_7seg.c: $SEG_FONT not found" >&2
+fi
+
 echo "done"
