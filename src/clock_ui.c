@@ -83,6 +83,7 @@ static void update_clock_ui(datetime_t *t);
 static void brightness_set(int v);
 static void apply_theme(void);
 static void rtc_set_from_build(void);
+static int  battery_percent(float v);
 
 static void slider_brightness_cb(lv_event_t *e);
 static void switch_sound_cb(lv_event_t *e);
@@ -214,7 +215,7 @@ static void build_info_tile(lv_obj_t *tile)
     lv_obj_align(imu_label, LV_ALIGN_CENTER, 0, -10);
 
     batt_label = lv_label_create(tile);
-    lv_obj_set_style_text_font(batt_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(batt_label, &font_cjk_16, 0);
     lv_obj_set_style_text_color(batt_label, lv_color_hex(0xB0BEC5), 0);
     lv_label_set_text(batt_label, "BAT: --");
     lv_obj_align(batt_label, LV_ALIGN_CENTER, 0, 28);
@@ -610,14 +611,38 @@ void App_Update(void)
         lv_label_set_text(imu_label, b);
 
         adc_select_input(BAT_CHANNEL);
-        uint16_t raw = adc_read();
-        float v = raw * 3.3f / 4096.0f * 3.0f;
-        snprintf(b, sizeof(b), "BAT: %.2f V", (double)v);
+        uint32_t raw = 0;
+        for (int i = 0; i < 8; i++) raw += adc_read();
+        float v = (raw / 8.0f) * 3.299f / 4096.0f * 3.0f;   /* 分压比 3:1 */
+        snprintf(b, sizeof(b), "电量 %d%%   %.2fV",
+                 battery_percent(v), (double)v);
         lv_label_set_text(batt_label, b);
     }
 }
 
 /* ================= 辅助 ================= */
+/* 单节锂电池电压 -> 电量百分比（轻载放电曲线，线性插值） */
+static int battery_percent(float v)
+{
+    static const float volt[] = {
+        4.20f, 4.10f, 4.00f, 3.90f, 3.80f, 3.75f,
+        3.70f, 3.65f, 3.60f, 3.50f, 3.40f, 3.30f, 3.20f
+    };
+    static const int pct[] = {
+        100, 90, 80, 65, 50, 40, 32, 25, 20, 12, 7, 3, 0
+    };
+    const int n = (int)(sizeof(pct) / sizeof(pct[0]));
+    if (v >= volt[0])     return 100;
+    if (v <= volt[n - 1]) return 0;
+    for (int i = 0; i < n - 1; i++) {
+        if (v <= volt[i] && v >= volt[i + 1]) {
+            float f = (v - volt[i + 1]) / (volt[i] - volt[i + 1]);
+            return pct[i + 1] + (int)((pct[i] - pct[i + 1]) * f + 0.5f);
+        }
+    }
+    return 0;
+}
+
 static void update_clock_ui(datetime_t *t)
 {
     char buf[40];
