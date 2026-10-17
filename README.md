@@ -10,6 +10,7 @@ RP2350-Touch-LCD-3.49 (Waveshare) 横屏 LVGL 时钟。
 - 时钟页右半区：上滑调亮、下滑调暗
 - 每秒“滴答”声（由 `tools/gen_tick_pcm.py` 从音频文件提取 PCM，ES8311 + core1 常驻喂 I2S）
 - 电源键：短按熄屏/亮屏，长按关机
+- 烧录后首次启动自动用编译时间校准 RTC（正常重启不会重置）
 
 ## 硬件
 - RP2350B + AXS15231B 3.49" 172x640 QSPI 屏（含触摸）+ PCF85063A RTC
@@ -26,6 +27,11 @@ cmake --build build
 # 产物: build/pico-clock.uf2
 ```
 
+推荐用一键脚本烧录（会自动刷新编译时间戳并烧录，便于启动时校准 RTC）：
+```bash
+tools/flash.sh
+```
+
 ## 关键文件
 - `src/clock_ui.c`  — 界面 + 音频 + 电源键 + 显示旋转
 - `src/app_main.c`  — 入口 `app_main()`
@@ -34,6 +40,7 @@ cmake --build build
 - `src/tick_pcm.c` `src/tick_pcm.h` — 滴答声 PCM 样本（由 `tools/gen_tick_pcm.py` 生成）
 - `tools/gen_fonts.sh` — 从 `clock_ui.c` 的字符串提取字符并生成字库
 - `tools/gen_tick_pcm.py` — 从 mp3 提取“滴答”样本并生成 PCM 数组
+- `tools/flash.sh`   — 刷新编译时间 + 编译 + 烧录（每次烧录会校准 RTC）
 - `tools/fonts/`    — 字库源文件（DroidSansFallback / DSEG7，含 OFL 许可）
 - `include/clock_ui.h` `include/app.h` — 头文件
 - `include/lv_conf.h` — LVGL 配置

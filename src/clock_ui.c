@@ -88,6 +88,9 @@ static void update_clock_ui(datetime_t *t);
 static void brightness_set(int v);
 static void apply_theme(void);
 static void rtc_set_from_build(void);
+static void build_time_to_datetime(datetime_t *t);
+static int  weekday_from_ymd(int y, int m, int d);
+static int64_t datetime_to_sec(const datetime_t *t);
 static int  battery_percent(float v);
 
 static void slider_brightness_cb(lv_event_t *e);
@@ -480,10 +483,24 @@ void App_Init(void)
 {
     audio_init();
 
-    datetime_t t;
-    PCF85063A_Read_now(&t);
-    if (t.year < 2024 || t.year > 2099) {
-        rtc_set_from_build();
+    /* 烧录后首次启动校准 RTC：
+       编译 -> 烧录 -> 启动通常只差十几秒，因此若 RTC 无效、早于编译时间，
+       或与编译时间相差在 120 秒内，就认为刚烧录过，用编译时间校准。
+       正常重启时 RTC 已走远，不会触发。 */
+    datetime_t rtc, build;
+    PCF85063A_Read_now(&rtc);
+    build_time_to_datetime(&build);
+    bool need = (rtc.year < 2024 || rtc.year > 2099);
+    if (!need) {
+        int64_t rs = datetime_to_sec(&rtc);
+        int64_t bs = datetime_to_sec(&build);
+        need = (rs < bs) || (rs - bs <= 120);
+    }
+    if (need) {
+        PCF85063A_Set_All(build);
+        printf("RTC calibrated to %04d/%02d/%02d %02d:%02d:%02d\r\n",
+               build.year, build.month, build.day,
+               build.hour, build.min, build.sec);
     }
 
     multicore_launch_core1(audio_feed_core1);
@@ -649,7 +666,8 @@ static void apply_theme(void)
     if (sec_bar)    lv_obj_set_style_bg_color(sec_bar, lv_color_hex(c), LV_PART_INDICATOR);
 }
 
-static void rtc_set_from_build(void)
+/* 由编译日期/时间（__DATE__/__TIME__）生成 datetime */
+static void build_time_to_datetime(datetime_t *t)
 {
     char mon[4] = {0};
     int day = 1, year = 2024, hh = 0, mm = 0, ss = 0;
@@ -659,9 +677,40 @@ static void rtc_set_from_build(void)
     const char *p = strstr(months, mon);
     int month = p ? (int)(p - months) / 3 + 1 : 1;
 
+    t->year = year; t->month = month; t->day = day;
+    t->dotw = weekday_from_ymd(year, month, day);
+    t->hour = hh; t->min = mm; t->sec = ss;
+}
+
+/* 0=周日（Sakamoto 算法） */
+static int weekday_from_ymd(int y, int m, int d)
+{
+    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    if (m < 3) y -= 1;
+    int w = (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
+    return w < 0 ? w + 7 : w;
+}
+
+/* 自 2000-01-01 起的秒数，仅用于比较/求差 */
+static int64_t datetime_to_sec(const datetime_t *t)
+{
+    static const int mdays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int64_t days = 0;
+    for (int y = 2000; y < t->year; y++)
+        days += 365 + ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0);
+    for (int m = 1; m < t->month && m <= 12; m++) {
+        days += mdays[m - 1];
+        if (m == 2 && ((t->year % 4 == 0 && t->year % 100 != 0) || t->year % 400 == 0))
+            days++;
+    }
+    days += t->day - 1;
+    return days * 86400 + (int64_t)t->hour * 3600 + t->min * 60 + t->sec;
+}
+
+static void rtc_set_from_build(void)
+{
     datetime_t t;
-    t.year = year; t.month = month; t.day = day; t.dotw = 0;
-    t.hour = hh; t.min = mm; t.sec = ss;
+    build_time_to_datetime(&t);
     PCF85063A_Set_All(t);
 }
 
